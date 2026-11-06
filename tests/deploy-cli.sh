@@ -63,6 +63,8 @@ requests() { out=$(cat "$FAKE_ENVOYER_DIR/requests.log" 2>/dev/null); }
 git init -q --bare "$TMP/origin.git"
 git clone -q "$TMP/origin.git" "$TMP/shop app" 2>/dev/null
 cd "$TMP/shop app" || exit 1
+# Git for Windows converts line ends in git archive; keep the files as committed.
+git config core.autocrlf false
 echo one > assets.txt
 git add . && git commit -qm "Old commit" && OLD=$(git rev-parse HEAD)
 mkdir -p deploy
@@ -80,7 +82,7 @@ git checkout -q main
 
 echo "== not configured"
 run "config, nothing" 0 config;                    has "project_file_missing=1"; has "token=missing"
-run "trigger, no project file" 1 trigger staging;  has "No $TMP/shop app/.claude/deploy.json"
+run "trigger, no project file" 1 trigger staging;  has "shop app/.claude/deploy.json. Create it"
 run "help" 0 help;                                 has "deploy.sh trigger ENV"; has "The token and the hooks are never printed"
 
 mkdir -p .claude
