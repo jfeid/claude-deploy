@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# A stand-in for curl that answers like a small Envoyer API, for tests/deploy-cli.sh.
+# Projects 101 (Shop staging, branch staging) and 102 (Shop production, branch main).
+# Deploy hooks: hook-staging -> 101, hook-prod -> 102.
+# State lives in $FAKE_ENVOYER_DIR:
+#   deployments-<project>.json  the listed deployments
+#   pending-<project>.json      a triggered deployment not listed yet
+#   lag-<project>               list calls left before the pending one is listed
+#   polls-<deployment>          status calls so far
+#   requests.log                method, path, auth=ok|missing|bad, and the argv
+# FAKE_ENVOYER_LAG    list calls before a new deployment is listed (default 1)
+# FAKE_ENVOYER_STEPS  status calls before a deployment ends (default 2)
+# FAKE_ENVOYER_RESULT how it ends (default finished)
+# FAKE_ENVOYER_FAIL   answer every request with this HTTP status
+set -u
+dir="${FAKE_ENVOYER_DIR:?}"
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) jq() { command jq "$@" | tr -d '\r'; } ;;
+esac
+argv="$*"
+method=GET url="" conf=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -X) method="$2"; shift 2 ;;
+        -K) [ "$2" = - ] && conf=$(cat); shift 2 ;;
+        -H|-w|--max-time) shift 2 ;;
+        http://*|https://*) url="$1"; shift ;;
+        *) shift ;;
+    esac
+done
+# The URL may come in the config on stdin.
+if [ -z "$url" ]; then
+    url=$(printf '%s\n' "$conf" | sed -n 's/^url = "\(.*\)"$/\1/p' | sed 's/\\\(.\)/\1/g')
+fi
+path=$(printf '%s' "$url" | sed -E 's#^https?://[^/]+##')
+hdr=$(printf '%s\n' "$conf" | sed -n 's/^header = "Authorization: Bearer \(.*\)"$/\1/p' | sed 's/\\\(.\)/\1/g')
+auth=missing
+[ -n "$hdr" ] && { if [ "$hdr" = "${FAKE_ENVOYER_TOKEN:-}" ]; then auth=ok; else auth=bad; fi; }
+printf '%s %s auth=%s argv=[%s]\n' "$method" "$path" "$auth" "$argv" >> "$dir/requests.log"
+
+reply() { printf '%s\n%s' "$2" "$1"; exit 0; }
+
+[ -n "${FAKE_ENVOYER_FAIL:-}" ] && reply "$FAKE_ENVOYER_FAIL" '{"message":"Server Error"}'
+
+p="${path%%\?*}"
+q="${path#*\?}"; [ "$q" = "$path" ] && q=""
+
+project_json() {
+    case "$1" in
+        101) echo '{"id":101,"name":"Shop staging","branch":"staging"}' ;;
+        102) echo '{"id":102,"name":"Shop production","branch":"main"}' ;;
+    esac
+}
+listed() { cat "$dir/deployments-$1.json" 2>/dev/null || echo '[]'; }
+
+case "$method $p" in
+    "POST /deploy/"*)
+        case "${p#/deploy/}" in
+            hook-staging) pid=101 ;;
+            hook-prod) pid=102 ;;
+            *) reply 404 'Not Found' ;;
+        esac
+        sha="0123456789abcdef0123456789abcdef01234567"
+        case "$q" in sha=*) sha="${q#sha=}" ;; esac
+        last=$(listed "$pid" | jq '[.[].id] | max // 500')
+        jq -cn --argjson id "$((last + 1))" --arg sha "$sha" --arg q "$q" \
+            '{id: $id, status: "queued", commit_hash: $sha, commit_message: ("Deploy " + $q + "\nsecond line")}' \
+            > "$dir/pending-$pid.json"
+        echo "${FAKE_ENVOYER_LAG:-1}" > "$dir/lag-$pid"
+        reply 200 '' ;;
+esac
+
+[ "$auth" = ok ] || reply 401 '{"message":"Unauthenticated."}'
+
+case "$method $p" in
+    "GET /api/projects")
+        reply 200 "$(jq -cn --argjson a "$(project_json 101)" --argjson b "$(project_json 102)" '{projects: [$a, $b]}')" ;;
+    "GET /api/projects/101"|"GET /api/projects/102")
+        reply 200 "{\"project\":$(project_json "${p##*/}")}" ;;
+    "GET /api/projects/101/deployments"|"GET /api/projects/102/deployments")
+        pid=$(printf '%s' "$p" | cut -d/ -f4)
+        if [ -f "$dir/pending-$pid.json" ]; then
+            lag=$(cat "$dir/lag-$pid")
+            if [ "$lag" -le 0 ]; then
+                listed "$pid" | jq -c --slurpfile n "$dir/pending-$pid.json" '$n + .' > "$dir/new.json"
+                mv "$dir/new.json" "$dir/deployments-$pid.json"
+                rm -f "$dir/pending-$pid.json" "$dir/lag-$pid"
+            else
+                echo $((lag - 1)) > "$dir/lag-$pid"
+            fi
+        fi
+        reply 200 "$(listed "$pid" | jq -c '{deployments: .}')" ;;
+    "GET /api/projects/"*"/deployments/"*)
+        pid=$(printf '%s' "$p" | cut -d/ -f4); did="${p##*/}"
+        d=$(listed "$pid" | jq -c --argjson id "$did" 'map(select(.id == $id)) | first // empty')
+        [ -n "$d" ] || reply 404 '{"message":"Not found."}'
+        n=$(( $(cat "$dir/polls-$did" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$dir/polls-$did"
+        st=$(printf '%s' "$d" | jq -r .status)
+        if [ "$st" = queued ] || [ "$st" = running ]; then
+            if [ "$n" -ge "${FAKE_ENVOYER_STEPS:-2}" ]; then st="${FAKE_ENVOYER_RESULT:-finished}"; else st=running; fi
+        fi
+        reply 200 "$(printf '%s' "$d" | jq -c --arg st "$st" '{deployment: (. + {status: $st})}')" ;;
+esac
+reply 404 '{"message":"Not found."}'

@@ -1,0 +1,24 @@
+{
+  "name": "envoyer-deploy",
+  "displayName": "Envoyer Deploy",
+  "version": "0.1.0",
+  "description": "Deploy with Envoyer from Claude Code: trigger the deploy hook for staging or production (or a given commit or branch), wait for the deployment and report it. Optional checks that CI-built assets are on the server first, and an optional Jira label sync afterwards.",
+  "author": {
+    "name": "Giannis Feidaros",
+    "email": "info@maxweb.gr",
+    "url": "https://github.com/jfeid"
+  },
+  "homepage": "https://github.com/jfeid/claude-deploy",
+  "repository": "https://github.com/jfeid/claude-deploy",
+  "documentationUrl": "https://github.com/jfeid/claude-deploy#readme",
+  "supportUrl": "https://github.com/jfeid/claude-deploy/issues",
+  "privacyPolicyUrl": "https://github.com/jfeid/claude-deploy/blob/main/PRIVACY.md",
+  "license": "MIT",
+  "keywords": [
+    "envoyer",
+    "deploy",
+    "deployment",
+    "laravel",
+    "ci"
+  ]
+}

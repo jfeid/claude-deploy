@@ -1,0 +1,15 @@
+{
+  "name": "claude-deploy",
+  "description": "Envoyer deployments for Claude Code",
+  "owner": {
+    "name": "jfeid",
+    "url": "https://github.com/jfeid"
+  },
+  "plugins": [
+    {
+      "name": "envoyer-deploy",
+      "source": "./",
+      "description": "Trigger Envoyer deployments for staging or production and wait for the result"
+    }
+  ]
+}

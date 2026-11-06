@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# A stand-in for ssh, for tests/deploy-cli.sh: runs the remote command in
+# $FAKE_ENVOYER_DIR/server-<host>. The host "down" fails like an unreachable server.
+set -u
+dir="${FAKE_ENVOYER_DIR:?}"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o) shift 2 ;;
+        -*) shift ;;
+        *) break ;;
+    esac
+done
+host="$1"; shift
+printf 'ssh %s %s\n' "$host" "$*" >> "$dir/requests.log"
+[ "$host" = down ] && { echo "ssh: connect to host down port 22: Connection refused" >&2; exit 255; }
+mkdir -p "$dir/server-$host"
+cd "$dir/server-$host" || exit 255
+cmd="$*"
+# macOS runners have no timeout(1).
+cmd="${cmd#timeout 20 }"
+eval "$cmd"
